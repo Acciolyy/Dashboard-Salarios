@@ -1,5 +1,22 @@
 # 📊 Dashboard de Análise de Salários na Área de Dados
 
+<div align="center">
+
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://tech-salary-insights.streamlit.app/)
+
+**🚀 [Acesse o Dashboard ao Vivo](https://tech-salary-insights.streamlit.app/) 🚀**
+
+*Dashboard interativo para análise de salários em Data Science, Engineering e Analytics*
+
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.44.1-FF4B4B.svg)](https://streamlit.io/)
+[![Pandas](https://img.shields.io/badge/Pandas-2.2.3-150458.svg)](https://pandas.pydata.org/)
+[![Plotly](https://img.shields.io/badge/Plotly-5.24.1-3F4F75.svg)](https://plotly.com/)
+
+</div>
+
+---
+
 ## 👨‍💻 Sobre o Desenvolvedor
 
 Olá! Meu nome é **Thiago Viriato Accioly** e sou estudante de **Engenharia de Software na Universidade de Brasília (UnB)**. 
@@ -20,6 +37,14 @@ Este projeto também demonstra minhas habilidades em:
 Este é um **dashboard interativo de análise salarial** desenvolvido em Python, focado especificamente no mercado de trabalho da área de dados (Data Science, Data Engineering, Data Analysis, BI, entre outros). O projeto oferece uma interface web moderna e intuitiva que permite aos usuários explorarem tendências salariais, compararem diferentes posições e obterem insights valiosos sobre o mercado de trabalho tech.
 
 O dashboard processa um dataset com **mais de 133 mil registros** contendo informações detalhadas sobre salários, tipos de contrato, localização geográfica, níveis de senioridade e modalidades de trabalho (remoto, presencial, híbrido).
+
+### 🌐 Demo Online
+
+O dashboard está **disponível online** e pode ser acessado diretamente pelo navegador, sem necessidade de instalação:
+
+**👉 [https://tech-salary-insights.streamlit.app/](https://tech-salary-insights.streamlit.app/)**
+
+Explore os dados, aplique filtros personalizados e descubra insights sobre salários na área de dados em tempo real!
 
 ---
 
@@ -235,6 +260,11 @@ O Streamlit abrirá automaticamente seu navegador padrão. Caso não abra, acess
 http://localhost:8501
 ```
 
+### 🌐 Ou acesse a versão online
+
+Prefere não instalar? Acesse a versão deployada:
+**[https://tech-salary-insights.streamlit.app/](https://tech-salary-insights.streamlit.app/)**
+
 ---
 
 ## 📂 Estrutura do Projeto
@@ -336,6 +366,8 @@ Contribuições são sempre bem-vindas! Sinta-se à vontade para:
 
 **⭐ Se este projeto foi útil para você, considere dar uma estrela no repositório! ⭐**
 
-Desenvolvido por Thiago Viriato Accioly
+**🚀 [Acesse o Dashboard Online](https://tech-salary-insights.streamlit.app/) 🚀**
+
+Desenvolvido com 💙 por **Thiago Viriato Accioly**
 
 </div>
