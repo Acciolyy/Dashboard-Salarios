@@ -74,6 +74,21 @@ Explore os dados, aplique filtros personalizados e descubra insights sobre salá
    - Mapa coroplético mundial mostrando a média salarial por país
    - Escala de cores indicando regiões com melhores remunerações
 
+### 🌐 Mercado em Tempo Real
+
+Seção independente da análise histórica acima, que consulta a **API da Adzuna** para trazer uma referência salarial mais recente:
+
+- **Dois seletores fixos**: cargo (6 opções) e país (3 opções) — sem busca livre por texto
+- **Cargos disponíveis**: Data Scientist, Software Engineer, Data Engineer, Data Analyst, Engineer e Machine Learning Engineer (os 6 cargos com maior volume de registros no dataset histórico)
+- **Países disponíveis**: Brasil, Estados Unidos e Reino Unido
+- **Dados exibidos**: salário médio anual e faixa (mínimo–máximo) do cargo/país selecionados, na moeda local
+- **Cache de 24h**: os resultados ficam em cache (`ttl=86400`) para limitar o número de chamadas reais à API, independentemente da quantidade de visitantes
+- **Falha graciosa**: se a API estiver indisponível, com quota excedida ou credenciais inválidas, a seção exibe um aviso amigável em vez de quebrar o dashboard
+
+> ⚠️ **Por que o escopo é fixo (6 cargos x 3 países)?** A Adzuna oferece um plano gratuito limitado a **1.000 chamadas/mês**. Ao restringir as opções a 18 combinações possíveis e cachear cada uma por 24h, o consumo máximo teórico fica em `18 combinações × 30 dias ≈ 540 chamadas/mês`, bem abaixo do limite — mesmo em cenários de alto tráfego. Um campo de busca livre por cargo/país tornaria o consumo imprevisível e poderia estourar a cota gratuita.
+
+**Configuração necessária**: esta seção requer credenciais da Adzuna (`ADZUNA_APP_ID` e `ADZUNA_APP_KEY`) via variáveis de ambiente — veja a seção [Configurando a API da Adzuna](#-configurando-a-api-da-adzuna-opcional) abaixo. Sem elas, a seção exibe o aviso de indisponibilidade e o restante do dashboard continua funcionando normalmente.
+
 ### 🔍 Sistema de Filtros Avançado
 
 O dashboard oferece um sistema robusto de filtros na barra lateral, permitindo análises personalizadas:
@@ -120,11 +135,23 @@ Tabela completa e interativa com todos os dados filtrados, permitindo:
   - Sistema de widgets interativos (selectbox, multiselect, sliders)
   - Layout responsivo e moderno
   - Atualização automática da interface
+  - Cache de dados (`st.cache_data`) para limitar chamadas à API externa
+
+#### 🔌 Integração com API Externa
+- **Requests (v2.32.3)**: Cliente HTTP para consumir a API de salários da Adzuna
+- **python-dotenv (v1.0.1)**: Carregamento de credenciais a partir de um arquivo `.env` local (opcional, apenas para desenvolvimento)
 
 ### 🗃️ Dados
+
+#### Dataset histórico (estático)
 - **Dataset**: CSV com 133.341 registros
 - **Fonte de Dados**: Dados processados e disponibilizados via GitHub
 - **Campos**: ano, senioridade, contrato, cargo, salário, moeda, USD, residência, tipo de trabalho, empresa, tamanho da empresa, código ISO do país
+
+#### Mercado em tempo real
+- **Fonte de Dados**: [API de histórico salarial da Adzuna](https://developer.adzuna.com/)
+- **Escopo**: 6 cargos x 3 países fixos (18 combinações), sem busca livre — ver [seção Mercado em Tempo Real](#-mercado-em-tempo-real)
+- **Cache**: 24 horas por combinação (`@st.cache_data(ttl=86400)`)
 
 ### 🔧 Ferramentas de Desenvolvimento
 - **Git**: Controle de versão
@@ -249,12 +276,28 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-5. **Execute o dashboard**
+5. **(Opcional) Configure as credenciais da API Adzuna**
+
+Necessário apenas para a seção "🌐 Mercado em Tempo Real". Sem isso, o restante do dashboard funciona normalmente e essa seção exibe um aviso de indisponibilidade.
+
+```bash
+cp .env.example .env
+```
+
+Edite o `.env` e preencha com suas credenciais gratuitas obtidas em [developer.adzuna.com](https://developer.adzuna.com/):
+```
+ADZUNA_APP_ID=seu_app_id
+ADZUNA_APP_KEY=sua_app_key
+```
+
+> As credenciais nunca devem ser commitadas: o `.env` está no `.gitignore` e apenas o `.env.example` (sem valores) é versionado.
+
+6. **Execute o dashboard**
 ```bash
 streamlit run app.py
 ```
 
-6. **Acesse no navegador**
+7. **Acesse no navegador**
 O Streamlit abrirá automaticamente seu navegador padrão. Caso não abra, acesse:
 ```
 http://localhost:8501
@@ -272,9 +315,11 @@ Prefere não instalar? Acesse a versão deployada:
 ```
 Dashboard-Salarios/
 │
-├── app.py                          # Aplicação principal Streamlit
+├── app.py                          # Aplicação principal Streamlit (análise histórica + seção de mercado)
+├── adzuna_api.py                   # Integração com a API da Adzuna (cache 24h, escopo fixo)
 ├── requirements.txt                # Dependências do projeto
 ├── dados-imersao-final.csv         # Dataset com 133k+ registros
+├── .env.example                    # Modelo de variáveis de ambiente (sem valores reais)
 ├── README.md                       # Documentação do projeto
 ├── .gitignore                      # Arquivos ignorados pelo Git
 │
@@ -284,10 +329,12 @@ Dashboard-Salarios/
 ### 📝 Descrição dos Arquivos
 
 - **`app.py`**: Código principal da aplicação Streamlit com toda a lógica do dashboard
-- **`requirements.txt`**: Lista de dependências Python necessárias (pandas, streamlit, plotly)
+- **`adzuna_api.py`**: Cliente da API da Adzuna usado pela seção "Mercado em Tempo Real" — lê `ADZUNA_APP_ID`/`ADZUNA_APP_KEY` de variáveis de ambiente, nunca hardcoded, e cacheia resultados por 24h
+- **`requirements.txt`**: Lista de dependências Python necessárias (pandas, streamlit, plotly, requests, python-dotenv)
 - **`dados-imersao-final.csv`**: Dataset completo com 133.341 registros salariais
+- **`.env.example`**: Modelo do arquivo `.env` com as chaves esperadas (`ADZUNA_APP_ID`, `ADZUNA_APP_KEY`), sem valores reais
 - **`README.md`**: Documentação completa do projeto
-- **`.gitignore`**: Arquivo de configuração do Git para ignorar arquivos desnecessários
+- **`.gitignore`**: Arquivo de configuração do Git para ignorar arquivos desnecessários (inclui `.env`)
 - **`.venv/`**: Ambiente virtual Python (não incluído no repositório)
 
 ---
@@ -295,7 +342,7 @@ Dashboard-Salarios/
 ## 🔮 Melhorias Futuras
 
 ### Funcionalidades Técnicas
-- [ ] Integração com APIs de dados salariais em tempo real
+- [x] Integração com API de dados salariais em tempo real (Adzuna)
 - [ ] Sistema de autenticação para empresas
 - [ ] Exportação de relatórios em PDF/Excel
 - [ ] Análise preditiva com Machine Learning

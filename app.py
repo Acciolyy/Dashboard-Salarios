@@ -2,6 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+from adzuna_api import (
+    CARGOS_DISPONIVEIS,
+    PAISES_DISPONIVEIS,
+    AdzunaAPIError,
+    buscar_historico_salarial,
+)
+
 # --- Configuração da Página ---
 # Define o título da página, o ícone e o layout para ocupar a largura inteira.
 st.set_page_config(
@@ -11,39 +18,51 @@ st.set_page_config(
 )
 
 # --- Carregamento dos dados, são os dados que fiz no colab ---
-df = pd.read_csv("https://raw.githubusercontent.com/vqrca/dashboard_salarios_dados/refs/heads/main/dados-imersao-final.csv")
+@st.cache_data
+def carregar_dados() -> pd.DataFrame:
+    return pd.read_csv("https://raw.githubusercontent.com/vqrca/dashboard_salarios_dados/refs/heads/main/dados-imersao-final.csv")
+
+
+df = carregar_dados()
 
 # --- Barra Lateral (Filtros) ---
 st.sidebar.header("🔍 Filtros")
 
 # Filtro de Ano
 anos_disponiveis = sorted(df['ano'].unique())
-anos_selecionados = st.sidebar.multiselect("Ano", anos_disponiveis, default=anos_disponiveis)
+anos_selecionados = st.sidebar.multiselect("Ano", anos_disponiveis)
 
 # Filtro de Senioridade
 senioridades_disponiveis = sorted(df['senioridade'].unique())
-senioridades_selecionadas = st.sidebar.multiselect("Senioridade", senioridades_disponiveis, default=senioridades_disponiveis)
+senioridades_selecionadas = st.sidebar.multiselect("Senioridade", senioridades_disponiveis)
 
 # Filtro por Tipo de Contrato
 contratos_disponiveis = sorted(df['contrato'].unique())
-contratos_selecionados = st.sidebar.multiselect("Tipo de Contrato", contratos_disponiveis, default=contratos_disponiveis)
+contratos_selecionados = st.sidebar.multiselect("Tipo de Contrato", contratos_disponiveis)
 
 # Filtro por Tamanho da Empresa
 tamanhos_disponiveis = sorted(df['tamanho_empresa'].unique())
-tamanhos_selecionados = st.sidebar.multiselect("Tamanho da Empresa", tamanhos_disponiveis, default=tamanhos_disponiveis)
+tamanhos_selecionados = st.sidebar.multiselect("Tamanho da Empresa", tamanhos_disponiveis)
 
 # Filtro por Cargo
 cargos_disponiveis = sorted(df['cargo'].unique())
-cargos_selecionados = st.sidebar.multiselect("Cargo", cargos_disponiveis, default=cargos_disponiveis)
+cargos_selecionados = st.sidebar.multiselect("Cargo", cargos_disponiveis)
 
 # --- Filtragem do DataFrame, é onde aplica os filtros nos dados ---
 # O dataframe principal é filtrado com base nas seleções feitas na barra lateral.
+# Filtro vazio (nenhuma opção marcada) é tratado como "sem filtro aplicado" (mostra tudo).
+def filtro_ou_tudo(coluna: pd.Series, selecionados: list) -> pd.Series:
+    if not selecionados:
+        return pd.Series(True, index=coluna.index)
+    return coluna.isin(selecionados)
+
+
 df_filtrado = df[
-    (df['ano'].isin(anos_selecionados)) &
-    (df['senioridade'].isin(senioridades_selecionadas)) &
-    (df['contrato'].isin(contratos_selecionados)) &
-    (df['tamanho_empresa'].isin(tamanhos_selecionados)) &
-    (df['cargo'].isin(cargos_selecionados))
+    filtro_ou_tudo(df['ano'], anos_selecionados) &
+    filtro_ou_tudo(df['senioridade'], senioridades_selecionadas) &
+    filtro_ou_tudo(df['contrato'], contratos_selecionados) &
+    filtro_ou_tudo(df['tamanho_empresa'], tamanhos_selecionados) &
+    filtro_ou_tudo(df['cargo'], cargos_selecionados)
 ]
 
 # --- Conteúdo Principal ---
@@ -147,3 +166,60 @@ with col_graf4:
 # --- Tabela de Dados Detalhados ---
 st.subheader("Dados Detalhados")
 st.dataframe(df_filtrado)
+
+st.markdown("---")
+
+# --- Mercado em Tempo Real (API Adzuna) ---
+# Seção independente da análise histórica acima: consulta a API da Adzuna
+# para um conjunto fixo de 6 cargos x 3 países (18 combinações), com
+# resultado em cache por 24h. Ver README.md para detalhes do escopo fixo.
+st.subheader("🌐 Mercado em Tempo Real")
+st.markdown(
+    "Consulte a média salarial recente informada pela [Adzuna](https://www.adzuna.com/), "
+    "um agregador de vagas de emprego, para um conjunto pré-definido de cargos e países."
+)
+
+col_sel1, col_sel2 = st.columns(2)
+with col_sel1:
+    cargo_mercado = st.selectbox("Cargo", CARGOS_DISPONIVEIS)
+with col_sel2:
+    pais_mercado = st.selectbox("País", list(PAISES_DISPONIVEIS.keys()))
+
+pais_info = PAISES_DISPONIVEIS[pais_mercado]
+
+# A chamada a buscar_historico_salarial só deve ocorrer quando o usuário clicar
+# em "Consultar" — nunca automaticamente no carregamento da página ou em reruns
+# (ex.: causados pelo file watcher ou por outros widgets da sidebar).
+if "mercado_resultado" not in st.session_state:
+    st.session_state.mercado_resultado = None
+if "mercado_erro" not in st.session_state:
+    st.session_state.mercado_erro = False
+
+if st.button("🔎 Consultar"):
+    try:
+        st.session_state.mercado_resultado = {
+            **buscar_historico_salarial(cargo_mercado, pais_info["codigo"]),
+            "moeda": pais_info["moeda"],
+        }
+        st.session_state.mercado_erro = False
+    except AdzunaAPIError:
+        st.session_state.mercado_resultado = None
+        st.session_state.mercado_erro = True
+
+if st.session_state.mercado_resultado:
+    resultado_mercado = st.session_state.mercado_resultado
+    moeda = resultado_mercado["moeda"]
+
+    col_m1, col_m2 = st.columns(2)
+    col_m1.metric("Salário médio anual", f"{moeda} {resultado_mercado['media']:,.0f}")
+    col_m2.metric(
+        "Faixa (mín - máx)",
+        f"{moeda} {resultado_mercado['minimo']:,.0f} - {moeda} {resultado_mercado['maximo']:,.0f}",
+    )
+    st.caption("🕒 Dado em cache, atualizado a cada 24h — não reflete tempo real por visita.")
+elif st.session_state.mercado_erro:
+    st.warning(
+        "⚠️ Dados de mercado em tempo real temporariamente indisponíveis."
+    )
+else:
+    st.info("Selecione um cargo e um país e clique em **Consultar** para ver os dados de mercado.")
