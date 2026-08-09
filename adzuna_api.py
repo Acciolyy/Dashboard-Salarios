@@ -52,6 +52,8 @@ def buscar_historico_salarial(cargo: str, pais_codigo: str) -> dict:
     reais à API, independentemente de quantos visitantes acessem o dashboard.
     """
     if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
+        # TODO: debug temporário — remover depois de diagnosticar falhas da API
+        print("[DEBUG Adzuna] ADZUNA_APP_ID/ADZUNA_APP_KEY ausentes em os.environ.")
         raise AdzunaAPIError("Credenciais da API Adzuna não configuradas.")
 
     url = ADZUNA_HISTORY_URL.format(pais_codigo=pais_codigo)
@@ -82,6 +84,8 @@ def buscar_historico_salarial(cargo: str, pais_codigo: str) -> dict:
 
     valores_mensais = list(dados.get("month", {}).values())
     if not valores_mensais:
+        # TODO: debug temporário — remover depois de diagnosticar falhas da API
+        print(f"[DEBUG Adzuna] month vazio para cargo={cargo!r} pais={pais_codigo!r}: {dados}")
         raise AdzunaAPIError("Nenhum dado de salário retornado para essa combinação.")
 
     return {
