@@ -99,50 +99,14 @@ Dashboard-Salarios/
 
 ---
 
-## Como rodar localmente
+## Decisões de projeto
 
-Requisitos: Python 3.9+ (exigido pelas versões fixas de Streamlit e Pandas). A internet só é necessária se o CSV local não puder ser lido ou para a seção da Adzuna.
-
-```bash
-git clone https://github.com/Acciolyy/Dashboard-Salarios.git
-cd Dashboard-Salarios
-
-python -m venv .venv
-source .venv/bin/activate        # Windows (PowerShell): .venv\Scripts\Activate.ps1
-
-pip install -r requirements.txt
-```
-
-### Chave da Adzuna (opcional)
-
-Só a seção "Mercado em Tempo Real" depende dela. Sem as variáveis, o resto do dashboard funciona e essa seção mostra o aviso de indisponibilidade.
-
-```bash
-cp .env.example .env
-```
-
-Preencha o `.env` com as credenciais obtidas em [developer.adzuna.com](https://developer.adzuna.com/):
-
-```
-ADZUNA_APP_ID=
-ADZUNA_APP_KEY=
-```
-
-Também é possível exportar as duas variáveis diretamente no ambiente. O `.env` está no `.gitignore`; **nunca o versione**.
-
-### Testes
-
-```bash
-python -m unittest discover -s tests
-```
-
-### Executar
-
-```bash
-streamlit run app.py
-```
-
-Acesse `http://localhost:8501`.
+- **Escopo fixo na Adzuna (6 cargos × 3 países).** A consulta é limitada a 18 combinações para manter o consumo de chamadas previsível dentro da cota gratuita (1.000 chamadas/mês, segundo o comentário no código), em vez de oferecer busca livre.
+- **Duas camadas de proteção da cota.** Respostas bem-sucedidas ficam em cache por 24h e falhas são lembradas por 5 minutos, para que cliques repetidos não gastem chamadas à toa. A API só é consultada quando o usuário clica em **Consultar**.
+- **Segredos fora do código.** As credenciais são lidas das variáveis de ambiente `ADZUNA_APP_ID` e `ADZUNA_APP_KEY`. O `.env` está no `.gitignore` e o `.env.example` só lista os nomes. Sem as credenciais, apenas a seção da Adzuna fica indisponível; o resto do dashboard funciona.
+- **Erros sem vazamento.** A URL da requisição contém a chave da API, então as mensagens mostradas ao usuário são textos fixos e o log registra status, cargo e país, mas não a exceção original.
+- **Dados com fallback.** O CSV versionado é lido primeiro e a cópia remota entra só se a leitura falhar, com mensagem de erro amigável se ambos falharem.
+- **Testes sem rede.** 13 testes (`unittest` + mocks) cobrem sucesso, cache, credenciais ausentes, timeout, erros HTTP, JSON inválido, resposta vazia e a memória de falhas.
 
 ---
 
