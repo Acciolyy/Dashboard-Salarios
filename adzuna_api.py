@@ -5,6 +5,7 @@ o consumo de chamadas previsível e dentro da cota gratuita da Adzuna
 (1.000 chamadas/mês). Ver README.md para detalhes.
 """
 
+import logging
 import os
 
 import requests
@@ -19,6 +20,10 @@ except ImportError:
 
 ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID")
 ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY")
+
+logger = logging.getLogger(__name__)
+
+REQUEST_TIMEOUT = 10  # segundos
 
 ADZUNA_HISTORY_URL = "https://api.adzuna.com/v1/api/jobs/{pais_codigo}/history"
 
@@ -41,7 +46,19 @@ PAISES_DISPONIVEIS = {
 
 
 class AdzunaAPIError(Exception):
-    """Erro ao consultar a API da Adzuna (credenciais, quota, indisponibilidade, etc)."""
+    """Erro ao consultar a API da Adzuna.
+
+    A mensagem é segura para exibir ao usuário (nunca contém URL nem credenciais);
+    os detalhes técnicos vão para o log do servidor.
+    """
+
+
+def _mensagem_para_status(status: int) -> str:
+    if status in (401, 403):
+        return "Credenciais da Adzuna inválidas ou sem permissão."
+    if status == 429:
+        return "Limite de consultas da Adzuna atingido. Tente novamente mais tarde."
+    return "A Adzuna está indisponível no momento."
 
 
 @st.cache_data(ttl=86400)
@@ -52,9 +69,8 @@ def buscar_historico_salarial(cargo: str, pais_codigo: str) -> dict:
     reais à API, independentemente de quantos visitantes acessem o dashboard.
     """
     if not ADZUNA_APP_ID or not ADZUNA_APP_KEY:
-        # TODO: debug temporário — remover depois de diagnosticar falhas da API
-        print("[DEBUG Adzuna] ADZUNA_APP_ID/ADZUNA_APP_KEY ausentes em os.environ.")
-        raise AdzunaAPIError("Credenciais da API Adzuna não configuradas.")
+        logger.error("ADZUNA_APP_ID/ADZUNA_APP_KEY ausentes do ambiente.")
+        raise AdzunaAPIError("Credenciais da Adzuna não configuradas.")
 
     url = ADZUNA_HISTORY_URL.format(pais_codigo=pais_codigo)
     params = {
@@ -65,28 +81,29 @@ def buscar_historico_salarial(cargo: str, pais_codigo: str) -> dict:
         "content-type": "application/json",
     }
 
+    # Os logs não incluem a exceção original: sua mensagem contém a URL com app_key.
     try:
-        resposta = requests.get(url, params=params, timeout=10)
+        resposta = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
         resposta.raise_for_status()
         dados = resposta.json()
+    except requests.exceptions.Timeout:
+        logger.error("Timeout (%ss) consultando Adzuna: cargo=%r pais=%r", REQUEST_TIMEOUT, cargo, pais_codigo)
+        raise AdzunaAPIError("A Adzuna demorou demais para responder.") from None
+    except requests.exceptions.HTTPError as erro:
+        status = erro.response.status_code
+        logger.error("HTTP %s da Adzuna: cargo=%r pais=%r body=%s", status, cargo, pais_codigo, erro.response.text)
+        raise AdzunaAPIError(_mensagem_para_status(status)) from None
     except requests.exceptions.RequestException as erro:
-        # TODO: debug temporário — remover depois de diagnosticar falhas da API
-        resposta_erro = getattr(erro, "response", None)
-        if resposta_erro is not None:
-            print(f"[DEBUG Adzuna] status={resposta_erro.status_code} body={resposta_erro.text}")
-        else:
-            print(f"[DEBUG Adzuna] sem resposta HTTP (erro de conexão/timeout): {erro}")
-        raise AdzunaAPIError(f"Falha ao consultar a API da Adzuna: {erro}") from erro
-    except ValueError as erro:
-        # TODO: debug temporário — remover depois de diagnosticar falhas da API
-        print(f"[DEBUG Adzuna] status={resposta.status_code} body={resposta.text}")
-        raise AdzunaAPIError("Resposta inválida da API da Adzuna.") from erro
+        logger.error("Erro de conexão com a Adzuna (%s): cargo=%r pais=%r", type(erro).__name__, cargo, pais_codigo)
+        raise AdzunaAPIError("Não foi possível conectar à Adzuna.") from None
+    except ValueError:
+        logger.error("JSON inválido da Adzuna: cargo=%r pais=%r body=%s", cargo, pais_codigo, resposta.text)
+        raise AdzunaAPIError("Resposta inválida da Adzuna.") from None
 
     valores_mensais = list(dados.get("month", {}).values())
     if not valores_mensais:
-        # TODO: debug temporário — remover depois de diagnosticar falhas da API
-        print(f"[DEBUG Adzuna] month vazio para cargo={cargo!r} pais={pais_codigo!r}: {dados}")
-        raise AdzunaAPIError("Nenhum dado de salário retornado para essa combinação.")
+        logger.error("Campo 'month' vazio: cargo=%r pais=%r resposta=%s", cargo, pais_codigo, dados)
+        raise AdzunaAPIError("A Adzuna não retornou dados para essa combinação.")
 
     return {
         "media": sum(valores_mensais) / len(valores_mensais),

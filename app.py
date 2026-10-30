@@ -228,7 +228,7 @@ pais_info = PAISES_DISPONIVEIS[pais_mercado]
 if "mercado_resultado" not in st.session_state:
     st.session_state.mercado_resultado = None
 if "mercado_erro" not in st.session_state:
-    st.session_state.mercado_erro = False
+    st.session_state.mercado_erro = None
 
 if st.button("🔎 Consultar"):
     try:
@@ -236,10 +236,10 @@ if st.button("🔎 Consultar"):
             **buscar_historico_salarial(cargo_mercado, pais_info["codigo"]),
             "moeda": pais_info["moeda"],
         }
-        st.session_state.mercado_erro = False
-    except AdzunaAPIError:
+        st.session_state.mercado_erro = None
+    except AdzunaAPIError as erro:
         st.session_state.mercado_resultado = None
-        st.session_state.mercado_erro = True
+        st.session_state.mercado_erro = str(erro)
 
 if st.session_state.mercado_resultado:
     resultado_mercado = st.session_state.mercado_resultado
@@ -253,8 +253,6 @@ if st.session_state.mercado_resultado:
     )
     st.caption("🕒 Dado em cache, atualizado a cada 24h — não reflete tempo real por visita.")
 elif st.session_state.mercado_erro:
-    st.warning(
-        "⚠️ Dados de mercado em tempo real temporariamente indisponíveis."
-    )
+    st.warning(f"⚠️ Dados de mercado indisponíveis: {st.session_state.mercado_erro}")
 else:
     st.info("Selecione um cargo e um país e clique em **Consultar** para ver os dados de mercado.")
