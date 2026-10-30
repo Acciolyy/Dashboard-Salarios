@@ -1,16 +1,10 @@
 import logging
-from pathlib import Path
 
 import streamlit as st
-import pandas as pd
-import plotly.express as px
 
-from adzuna_api import (
-    CARGOS_DISPONIVEIS,
-    PAISES_DISPONIVEIS,
-    AdzunaAPIError,
-    buscar_historico_salarial,
-)
+import graficos
+from dados import carregar_dados, filtrar
+from mercado import renderizar_mercado
 
 logger = logging.getLogger(__name__)
 
@@ -22,21 +16,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- Carregamento dos dados ---
-# Lê o CSV versionado junto do app; se não for possível, tenta a cópia remota.
-CSV_LOCAL = Path(__file__).parent / "dados-imersao-final.csv"
-CSV_REMOTO = "https://raw.githubusercontent.com/vqrca/dashboard_salarios_dados/refs/heads/main/dados-imersao-final.csv"
-
-
-@st.cache_data
-def carregar_dados() -> pd.DataFrame:
-    try:
-        return pd.read_csv(CSV_LOCAL)
-    except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as erro:
-        logger.warning("Falha ao ler %s (%s); usando a cópia remota.", CSV_LOCAL, erro)
-        return pd.read_csv(CSV_REMOTO)
-
-
 try:
     df = carregar_dados()
 except Exception:
@@ -47,37 +26,12 @@ except Exception:
 # --- Barra Lateral (Filtros) ---
 st.sidebar.header("🔍 Filtros")
 
-# Filtro de Ano
-anos_disponiveis = sorted(df['ano'].unique())
-anos_selecionados = st.sidebar.multiselect("Ano", anos_disponiveis)
+anos_selecionados = st.sidebar.multiselect("Ano", sorted(df['ano'].unique()))
+senioridades_selecionadas = st.sidebar.multiselect("Senioridade", sorted(df['senioridade'].unique()))
+contratos_selecionados = st.sidebar.multiselect("Tipo de Contrato", sorted(df['contrato'].unique()))
+tamanhos_selecionados = st.sidebar.multiselect("Tamanho da Empresa", sorted(df['tamanho_empresa'].unique()))
+cargos_selecionados = st.sidebar.multiselect("Cargo", sorted(df['cargo'].unique()))
 
-# Filtro de Senioridade
-senioridades_disponiveis = sorted(df['senioridade'].unique())
-senioridades_selecionadas = st.sidebar.multiselect("Senioridade", senioridades_disponiveis)
-
-# Filtro por Tipo de Contrato
-contratos_disponiveis = sorted(df['contrato'].unique())
-contratos_selecionados = st.sidebar.multiselect("Tipo de Contrato", contratos_disponiveis)
-
-# Filtro por Tamanho da Empresa
-tamanhos_disponiveis = sorted(df['tamanho_empresa'].unique())
-tamanhos_selecionados = st.sidebar.multiselect("Tamanho da Empresa", tamanhos_disponiveis)
-
-# Filtro por Cargo
-cargos_disponiveis = sorted(df['cargo'].unique())
-cargos_selecionados = st.sidebar.multiselect("Cargo", cargos_disponiveis)
-
-# --- Filtragem do DataFrame, é onde aplica os filtros nos dados ---
-# O dataframe principal é filtrado com base nas seleções feitas na barra lateral.
-# Filtro vazio (nenhuma opção marcada) é tratado como "sem filtro aplicado" (mostra tudo).
-def filtro_ou_tudo(coluna: pd.Series, selecionados: list) -> pd.Series:
-    if not selecionados:
-        return pd.Series(True, index=coluna.index)
-    return coluna.isin(selecionados)
-
-
-# O dashboard só exibe dados depois que pelo menos um filtro é selecionado —
-# evita mostrar o dataset inteiro sem filtro nenhum aplicado.
 filtros_aplicados = any([
     anos_selecionados,
     senioridades_selecionadas,
@@ -85,17 +39,14 @@ filtros_aplicados = any([
     tamanhos_selecionados,
     cargos_selecionados,
 ])
-
-if filtros_aplicados:
-    df_filtrado = df[
-        filtro_ou_tudo(df['ano'], anos_selecionados) &
-        filtro_ou_tudo(df['senioridade'], senioridades_selecionadas) &
-        filtro_ou_tudo(df['contrato'], contratos_selecionados) &
-        filtro_ou_tudo(df['tamanho_empresa'], tamanhos_selecionados) &
-        filtro_ou_tudo(df['cargo'], cargos_selecionados)
-    ]
-else:
-    df_filtrado = df.iloc[0:0]
+df_filtrado = filtrar(
+    df,
+    anos_selecionados,
+    senioridades_selecionadas,
+    contratos_selecionados,
+    tamanhos_selecionados,
+    cargos_selecionados,
+)
 
 # --- Conteúdo Principal ---
 st.title("🎲 Dashboard de Análise de Salários na Área de Dados")
@@ -133,19 +84,8 @@ else:
 
     with col_graf1:
         if not df_filtrado.empty:
-            cargos_unicos = df_filtrado['cargo'].nunique()
-            if cargos_unicos >= 2:
-                top_cargos = df_filtrado.groupby('cargo')['usd'].mean().nlargest(10).sort_values(ascending=True).reset_index()
-                grafico_cargos = px.bar(
-                    top_cargos,
-                    x='usd',
-                    y='cargo',
-                    orientation='h',
-                    title="Top 10 cargos por salário médio",
-                    labels={'usd': 'Média salarial anual (USD)', 'cargo': ''}
-                )
-                grafico_cargos.update_layout(title_x=0.1, yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(grafico_cargos, use_container_width=True)
+            if df_filtrado['cargo'].nunique() >= 2:
+                st.plotly_chart(graficos.top_cargos(df_filtrado), use_container_width=True)
             else:
                 st.info("ℹ️ Selecione 2 ou mais cargos no filtro para comparar os salários médios entre diferentes posições.")
         else:
@@ -153,15 +93,7 @@ else:
 
     with col_graf2:
         if not df_filtrado.empty:
-            grafico_hist = px.histogram(
-                df_filtrado,
-                x='usd',
-                nbins=30,
-                title="Distribuição de salários anuais",
-                labels={'usd': 'Faixa salarial (USD)', 'count': ''}
-            )
-            grafico_hist.update_layout(title_x=0.1)
-            st.plotly_chart(grafico_hist, use_container_width=True)
+            st.plotly_chart(graficos.distribuicao_salarios(df_filtrado), use_container_width=True)
         else:
             st.warning("Nenhum dado para exibir no gráfico de distribuição.")
 
@@ -169,32 +101,13 @@ else:
 
     with col_graf3:
         if not df_filtrado.empty:
-            remoto_contagem = df_filtrado['remoto'].value_counts().reset_index()
-            remoto_contagem.columns = ['tipo_trabalho', 'quantidade']
-            grafico_remoto = px.pie(
-                remoto_contagem,
-                names='tipo_trabalho',
-                values='quantidade',
-                title='Proporção dos tipos de trabalho',
-                hole=0.5
-            )
-            grafico_remoto.update_traces(textinfo='percent+label')
-            grafico_remoto.update_layout(title_x=0.1)
-            st.plotly_chart(grafico_remoto, use_container_width=True)
+            st.plotly_chart(graficos.tipos_trabalho(df_filtrado), use_container_width=True)
         else:
             st.warning("Nenhum dado para exibir no gráfico dos tipos de trabalho.")
 
     with col_graf4:
         if not df_filtrado.empty:
-            media_pais = df_filtrado.groupby('residencia_iso3')['usd'].mean().reset_index()
-            grafico_paises = px.choropleth(media_pais,
-                locations='residencia_iso3',
-                color='usd',
-                color_continuous_scale='rdylgn',
-                title='Salário médio por país',
-                labels={'usd': 'Salário médio (USD)', 'residencia_iso3': 'País'})
-            grafico_paises.update_layout(title_x=0.1)
-            st.plotly_chart(grafico_paises, use_container_width=True)
+            st.plotly_chart(graficos.salario_por_pais(df_filtrado), use_container_width=True)
         else:
             st.warning("Nenhum dado para exibir no gráfico de países.")
 
@@ -205,54 +118,4 @@ else:
 st.markdown("---")
 
 # --- Mercado em Tempo Real (API Adzuna) ---
-# Seção independente da análise histórica acima: consulta a API da Adzuna
-# para um conjunto fixo de 6 cargos x 3 países (18 combinações), com
-# resultado em cache por 24h. Ver README.md para detalhes do escopo fixo.
-st.subheader("🌐 Mercado em Tempo Real")
-st.markdown(
-    "Consulte a média salarial recente informada pela [Adzuna](https://www.adzuna.com/), "
-    "um agregador de vagas de emprego, para um conjunto pré-definido de cargos e países."
-)
-
-col_sel1, col_sel2 = st.columns(2)
-with col_sel1:
-    cargo_mercado = st.selectbox("Cargo", CARGOS_DISPONIVEIS)
-with col_sel2:
-    pais_mercado = st.selectbox("País", list(PAISES_DISPONIVEIS.keys()))
-
-pais_info = PAISES_DISPONIVEIS[pais_mercado]
-
-# A chamada a buscar_historico_salarial só deve ocorrer quando o usuário clicar
-# em "Consultar" — nunca automaticamente no carregamento da página ou em reruns
-# (ex.: causados pelo file watcher ou por outros widgets da sidebar).
-if "mercado_resultado" not in st.session_state:
-    st.session_state.mercado_resultado = None
-if "mercado_erro" not in st.session_state:
-    st.session_state.mercado_erro = None
-
-if st.button("🔎 Consultar"):
-    try:
-        st.session_state.mercado_resultado = {
-            **buscar_historico_salarial(cargo_mercado, pais_info["codigo"]),
-            "moeda": pais_info["moeda"],
-        }
-        st.session_state.mercado_erro = None
-    except AdzunaAPIError as erro:
-        st.session_state.mercado_resultado = None
-        st.session_state.mercado_erro = str(erro)
-
-if st.session_state.mercado_resultado:
-    resultado_mercado = st.session_state.mercado_resultado
-    moeda = resultado_mercado["moeda"]
-
-    col_m1, col_m2 = st.columns(2)
-    col_m1.metric("Salário médio anual", f"{moeda} {resultado_mercado['media']:,.0f}")
-    col_m2.metric(
-        "Faixa (mín - máx)",
-        f"{moeda} {resultado_mercado['minimo']:,.0f} - {moeda} {resultado_mercado['maximo']:,.0f}",
-    )
-    st.caption("🕒 Dado em cache, atualizado a cada 24h — não reflete tempo real por visita.")
-elif st.session_state.mercado_erro:
-    st.warning(f"⚠️ Dados de mercado indisponíveis: {st.session_state.mercado_erro}")
-else:
-    st.info("Selecione um cargo e um país e clique em **Consultar** para ver os dados de mercado.")
+renderizar_mercado()
