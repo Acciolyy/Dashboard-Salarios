@@ -1,3 +1,6 @@
+import logging
+from pathlib import Path
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -9,6 +12,8 @@ from adzuna_api import (
     buscar_historico_salarial,
 )
 
+logger = logging.getLogger(__name__)
+
 # --- Configuração da Página ---
 # Define o título da página, o ícone e o layout para ocupar a largura inteira.
 st.set_page_config(
@@ -17,13 +22,27 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- Carregamento dos dados, são os dados que fiz no colab ---
+# --- Carregamento dos dados ---
+# Lê o CSV versionado junto do app; se não for possível, tenta a cópia remota.
+CSV_LOCAL = Path(__file__).parent / "dados-imersao-final.csv"
+CSV_REMOTO = "https://raw.githubusercontent.com/vqrca/dashboard_salarios_dados/refs/heads/main/dados-imersao-final.csv"
+
+
 @st.cache_data
 def carregar_dados() -> pd.DataFrame:
-    return pd.read_csv("https://raw.githubusercontent.com/vqrca/dashboard_salarios_dados/refs/heads/main/dados-imersao-final.csv")
+    try:
+        return pd.read_csv(CSV_LOCAL)
+    except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as erro:
+        logger.warning("Falha ao ler %s (%s); usando a cópia remota.", CSV_LOCAL, erro)
+        return pd.read_csv(CSV_REMOTO)
 
 
-df = carregar_dados()
+try:
+    df = carregar_dados()
+except Exception:
+    logger.exception("Não foi possível carregar o dataset (local nem remoto).")
+    st.error("❌ Não foi possível carregar os dados no momento. Tente novamente mais tarde.")
+    st.stop()
 
 # --- Barra Lateral (Filtros) ---
 st.sidebar.header("🔍 Filtros")
