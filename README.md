@@ -22,7 +22,7 @@ O dashboard usa duas fontes independentes:
 
 - Arquivo `dados-imersao-final.csv`: **133.339 registros** (linhas de dados, sem o cabeçalho), de **2020 a 2025**, com 390 cargos distintos e 102 valores distintos de residência.
 - Colunas: `ano`, `senioridade`, `contrato`, `cargo`, `salario`, `moeda`, `usd`, `residencia`, `remoto`, `empresa`, `tamanho_empresa`, `residencia_iso3`.
-- `carregar_dados` (em `app.py`, com `@st.cache_data` **sem `ttl`**) lê primeiro o arquivo local ao lado do `app.py`. Se a leitura falhar (arquivo ausente, ilegível ou corrompido), registra um aviso no log e baixa a cópia remota de `https://raw.githubusercontent.com/vqrca/dashboard_salarios_dados/refs/heads/main/dados-imersao-final.csv`. O resultado fica em cache enquanto o processo do Streamlit estiver rodando.
+- `carregar_dados` (em `dados.py`, com `@st.cache_data` **sem `ttl`**) lê primeiro o arquivo local ao lado do `app.py`. Se a leitura falhar (arquivo ausente, ilegível ou corrompido), registra um aviso no log e baixa a cópia remota de `https://raw.githubusercontent.com/vqrca/dashboard_salarios_dados/refs/heads/main/dados-imersao-final.csv`. O resultado fica em cache enquanto o processo do Streamlit estiver rodando.
 - Se local e remoto falharem, o app mostra "Não foi possível carregar os dados no momento" e para (`st.stop()`).
 
 ### 2. API da Adzuna (seção "Mercado em Tempo Real")
@@ -56,16 +56,16 @@ Na seção da Adzuna, `buscar_historico_salarial` levanta `AdzunaAPIError` nos c
 | Resposta que não é JSON válido | Resposta inválida da Adzuna. |
 | API devolve **vazio** (`month` ausente ou vazio) | A Adzuna não retornou dados para essa combinação. |
 
-Os detalhes técnicos (status, corpo da resposta, cargo e país) vão para o log do servidor via `logging`. Falhas **não** entram no cache de 24h (coberto por teste), então o próximo clique em **Consultar** tenta a API de novo.
+Os detalhes técnicos (status, corpo da resposta, cargo e país) vão para o log do servidor via `logging`. Falhas **não** entram no cache de 24h (coberto por teste). Em vez disso, `consultar_historico_salarial` (a função chamada pela interface) lembra cada falha por **5 minutos** (`FALHA_TTL = 300`), por combinação cargo/país, e repete a mesma mensagem sem chamar a API. Passado esse prazo, o próximo clique em **Consultar** tenta de novo. Esse registro fica em memória do processo e é compartilhado entre os visitantes.
 
 ### Limitações conhecidas
 
 - **Sem retry nem fallback:** uma falha é exibida como aviso; não há nova tentativa automática nem valor alternativo.
-- **Falhas consomem cota:** como erros não são cacheados, cada clique após uma falha chama a API novamente.
+- **Falha lembrada por 5 minutos:** mesmo que a API volte antes disso, a combinação continua mostrando o erro até o prazo vencer (ou o servidor reiniciar).
 - **A consulta bloqueia a interface** por até 10 s (o timeout) enquanto aguarda a Adzuna.
 - **Rótulo da métrica:** a interface mostra "Salário médio anual", mas o código apenas faz a média dos valores mensais devolvidos pelo endpoint `history`; o significado exato da unidade depende da API e não é verificado no código.
 - **Sem dados até selecionar um filtro:** é intencional; o dashboard não exibe nada enquanto nenhum filtro estiver ativo.
-- **Os testes cobrem só a Adzuna:** o carregamento do CSV e os gráficos não têm testes automatizados.
+- **Os testes cobrem só a Adzuna:** o carregamento do CSV, a filtragem e os gráficos não têm testes automatizados.
 
 ---
 
@@ -73,7 +73,10 @@ Os detalhes técnicos (status, corpo da resposta, cargo e país) vão para o log
 
 ```
 Dashboard-Salarios/
-├── app.py                    # Aplicação Streamlit
+├── app.py                    # Ponto de entrada Streamlit (filtros, KPIs, layout)
+├── dados.py                  # Carga do CSV e filtragem
+├── graficos.py               # Gráficos Plotly
+├── mercado.py                # Seção "Mercado em Tempo Real"
 ├── adzuna_api.py             # Cliente da API da Adzuna
 ├── dados-imersao-final.csv   # Dataset (lido primeiro; a cópia remota é o fallback)
 ├── tests/                    # Testes da integração com a Adzuna
@@ -85,9 +88,12 @@ Dashboard-Salarios/
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `app.py` | Carrega o CSV (`carregar_dados`, local com fallback remoto), define os filtros da barra lateral (ano, senioridade, contrato, tamanho da empresa, cargo), calcula os KPIs, monta os gráficos Plotly e a tabela, e renderiza a seção da Adzuna com `st.session_state` para o resultado/erro. Nenhum dado é exibido até que pelo menos um filtro seja selecionado. |
-| `adzuna_api.py` | Lê as credenciais do ambiente (com `python-dotenv`, se instalado), define o escopo fixo de cargos/países, faz a requisição, valida a resposta, aplica o cache de 24h e define `AdzunaAPIError`. |
-| `tests/test_adzuna_api.py` | Testes (`unittest` + mocks, sem rede) de sucesso, cache, credenciais, timeout, HTTP, JSON inválido e resposta vazia. |
+| `app.py` | Ponto de entrada: configura a página, trata a falha de carga dos dados, define os filtros da barra lateral (ano, senioridade, contrato, tamanho da empresa, cargo), mostra os KPIs e a tabela, e organiza o layout. Nenhum dado é exibido até que pelo menos um filtro seja selecionado. |
+| `dados.py` | `carregar_dados` (CSV local com fallback remoto, `@st.cache_data`) e `filtrar`, que aplica os filtros. |
+| `graficos.py` | Quatro funções que devolvem figuras Plotly: top 10 cargos, distribuição de salários, tipos de trabalho e salário médio por país. |
+| `mercado.py` | Seção da Adzuna: seletores de cargo/país, botão **Consultar**, e `st.session_state` para guardar resultado ou erro. |
+| `adzuna_api.py` | Lê as credenciais do ambiente (com `python-dotenv`, se instalado), define o escopo fixo de cargos/países, faz a requisição, valida a resposta, aplica o cache de 24h, lembra falhas por 5 minutos e define `AdzunaAPIError`. |
+| `tests/test_adzuna_api.py` | Testes (`unittest` + mocks, sem rede) de sucesso, cache, credenciais, timeout, HTTP, JSON inválido, resposta vazia e memória de falhas. |
 | `requirements.txt` | pandas, streamlit, plotly, requests, python-dotenv, pyarrow. |
 | `.env.example` | Lista `ADZUNA_APP_ID` e `ADZUNA_APP_KEY` vazias. |
 
