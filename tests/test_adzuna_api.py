@@ -4,7 +4,7 @@ from unittest import mock
 import requests
 
 import adzuna_api
-from adzuna_api import AdzunaAPIError, buscar_historico_salarial
+from adzuna_api import AdzunaAPIError, buscar_historico_salarial, consultar_historico_salarial
 
 
 def resposta(status=200, json_data=None, json_erro=False):
@@ -84,6 +84,45 @@ class BuscarHistoricoSalarialTest(unittest.TestCase):
                 with self.assertRaises(AdzunaAPIError):
                     buscar_historico_salarial("Data Scientist", "us")
         self.assertEqual(get.call_count, 2)
+
+
+class ConsultarHistoricoSalarialTest(unittest.TestCase):
+    def setUp(self):
+        buscar_historico_salarial.clear()
+        adzuna_api._falhas_recentes.clear()
+        patcher = mock.patch.multiple(adzuna_api, ADZUNA_APP_ID="id", ADZUNA_APP_KEY="key")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_falha_recente_nao_chama_a_api_de_novo(self):
+        with mock.patch("requests.get", return_value=resposta(status=500)) as get:
+            for _ in range(3):
+                with self.assertRaisesRegex(AdzunaAPIError, "indisponível"):
+                    consultar_historico_salarial("Data Scientist", "us")
+        self.assertEqual(get.call_count, 1)
+
+    def test_falha_expira_apos_o_ttl(self):
+        with mock.patch("requests.get", return_value=resposta(status=500)) as get:
+            with mock.patch("time.monotonic", return_value=1000.0):
+                with self.assertRaises(AdzunaAPIError):
+                    consultar_historico_salarial("Data Scientist", "us")
+            with mock.patch("time.monotonic", return_value=1000.0 + adzuna_api.FALHA_TTL + 1):
+                with self.assertRaises(AdzunaAPIError):
+                    consultar_historico_salarial("Data Scientist", "us")
+        self.assertEqual(get.call_count, 2)
+
+    def test_falha_de_uma_combinacao_nao_afeta_outra(self):
+        with mock.patch("requests.get", side_effect=[resposta(status=500), resposta(json_data={"month": {"a": 5}})]):
+            with self.assertRaises(AdzunaAPIError):
+                consultar_historico_salarial("Data Scientist", "us")
+            self.assertEqual(consultar_historico_salarial("Data Scientist", "br")["media"], 5)
+
+    def test_sucesso_limpa_a_falha_registrada(self):
+        adzuna_api._falhas_recentes[("Data Scientist", "us")] = (0.0, "antiga")
+        with mock.patch("time.monotonic", return_value=adzuna_api.FALHA_TTL + 1):
+            with mock.patch("requests.get", return_value=resposta(json_data={"month": {"a": 5}})):
+                consultar_historico_salarial("Data Scientist", "us")
+        self.assertNotIn(("Data Scientist", "us"), adzuna_api._falhas_recentes)
 
 
 if __name__ == "__main__":

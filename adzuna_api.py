@@ -7,6 +7,7 @@ o consumo de chamadas previsível e dentro da cota gratuita da Adzuna
 
 import logging
 import os
+import time
 
 import requests
 import streamlit as st
@@ -24,6 +25,7 @@ ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY")
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 10  # segundos
+FALHA_TTL = 300  # segundos em que uma falha é lembrada antes de chamar a API de novo
 
 ADZUNA_HISTORY_URL = "https://api.adzuna.com/v1/api/jobs/{pais_codigo}/history"
 
@@ -110,3 +112,24 @@ def buscar_historico_salarial(cargo: str, pais_codigo: str) -> dict:
         "minimo": min(valores_mensais),
         "maximo": max(valores_mensais),
     }
+
+
+# Falhas recentes por (cargo, pais): o st.cache_data não guarda exceções, então sem isto
+# cada clique após uma falha gastaria cota da API. Vale por processo, não por sessão.
+_falhas_recentes: dict[tuple[str, str], tuple[float, str]] = {}
+
+
+def consultar_historico_salarial(cargo: str, pais_codigo: str) -> dict:
+    """Como `buscar_historico_salarial`, mas lembra falhas por `FALHA_TTL` segundos."""
+    chave = (cargo, pais_codigo)
+    falha = _falhas_recentes.get(chave)
+    if falha and time.monotonic() - falha[0] < FALHA_TTL:
+        raise AdzunaAPIError(falha[1])
+
+    try:
+        resultado = buscar_historico_salarial(cargo, pais_codigo)
+    except AdzunaAPIError as erro:
+        _falhas_recentes[chave] = (time.monotonic(), str(erro))
+        raise
+    _falhas_recentes.pop(chave, None)
+    return resultado
